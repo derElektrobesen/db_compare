@@ -3,25 +3,42 @@
 use strict;
 use warnings;
 
-use Time::HiRes qw();
+use POSIX;
+
+use TntInst;
+
+$SIG{CHLD} = "IGNORE";
 
 my %params = (
     n_processes     => 5,
-    sleep_time      => 0.5, # in seconds
+    sleep_time      => 1, # in seconds
 );
+
+sub change_user {
+    # change current process uid/gid
+    my $uid = scalar getpwnam 'nobody';
+    my $gid = scalar getpwnam 'nobody';
+
+    setgid $gid;
+    setuid $uid;
+}
 
 sub child_work {
     my $instance = shift;
+
+    change_user;
+
+    sleep 5;
 }
 
 sub master_work {
-    my %processes = map { $_{pid} => $_{name} } @{$_[0]}; # reference on array of references on hashes
+    my %processes = map { $_->{pid} => $_->{name} } @{$_[0]}; # reference on array of references on hashes
 
     open my $out_file, '>', "results_$$.log";
 
     my $first_step = 1;
     do {
-        Time::HiRes::sleep($params{sleep_time}) unless $first_step;
+        sleep($params{sleep_time}) unless $first_step;
         $first_step = 0;
 
         my @processes_list_copy = keys %processes;
@@ -48,7 +65,7 @@ sub master_work {
 }
 
 sub create_instances {
-    return ();
+    return ( TntInst->new );
 }
 
 sub main {
@@ -57,14 +74,15 @@ sub main {
 
     my $pid;
     for my $i (create_instances) {
-        for (0 .. $params{n_processes}) {
+        for (1 .. $params{n_processes}) {
             $pid = fork;
             unless ($pid) {
                 $instance = $i;
                 last;
             }
 
-            push @processes, { pid => $pid, name => $i->name };
+            print "Process $pid started...\n";
+            push @processes, { pid => $pid, name => $i->name() };
         }
         last if defined $instance;
     }
