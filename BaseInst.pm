@@ -14,6 +14,7 @@ package BaseInst; {
         };
 
         bless $self, $class;
+        srand time;
 
         return $self;
     }
@@ -33,6 +34,16 @@ package BaseInst; {
     sub insert {
         my $self = shift;
         carp $self->__u_m('insert');
+    }
+
+    sub select {
+        my $self = shift;
+        carp $self->__u_m('select');
+    }
+
+    sub delete {
+        my $self = shift;
+        carp $self->__u_m('delete');
     }
 }
 

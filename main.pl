@@ -5,7 +5,10 @@ use warnings;
 
 use POSIX;
 
+use List::Util qw( shuffle );
+
 use TntInst;
+use MemcachedInst;
 
 $SIG{CHLD} = "IGNORE";
 
@@ -23,12 +26,45 @@ sub change_user {
     setuid $uid;
 }
 
+sub gen_int {
+    my $compress_factor = shift;
+    return int(rand) % compress_factor;
+}
+
+sub gen_str {
+    my ($compress_factor, $size) = @_;
+    return join '', map {
+        my $data = $_ * gen_int($compress_factor);
+        "$data"
+    } 0 .. $size;
+}
+
+sub gen_bin {
+    my ($compress_factor, $size) = @_;
+    my @fmt = split //, "cCWaAzbBhHsSlqQiInNvVjJfd";
+
+    return join '', map {
+        join '', map { pack "$_*", gen_int($compress_factor) } shuffle @fmt;
+    } 0 .. $size;
+}
+
+sub generate_tuple {
+    my $tuple_size = shift;      # tuple_size
+    my $compress_factor = shift; # integer, may be undefined, 0 -- best compress
+
+    my @funcs = ( \&gen_int, \&gen_str, \&gen_bin );
+
+    return \map {
+        $funcs[int(rand) % scalar @funcs]->($compress_factor, $tuple_size);
+    } 0 .. $tuple_size * scalar @funcs;
+}
+
 sub child_work {
     my $instance = shift;
 
     change_user;
 
-    sleep 5;
+
 }
 
 sub master_work {
@@ -65,7 +101,10 @@ sub master_work {
 }
 
 sub create_instances {
-    return ( TntInst->new );
+    return (
+        #TntInst->new,
+        MemcachedInst->new,
+    );
 }
 
 sub main {
