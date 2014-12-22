@@ -97,3 +97,5 @@ sub main {
 }
 
 main;
+
+1;

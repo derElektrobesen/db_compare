@@ -1,24 +1,16 @@
 #!/usr/bin/perl
 
 package TntInst; {
+    use base BaseInst;
+
     use strict;
     use warnings;
 
     sub new {
         my $class = shift;
 
-        my $self = {
-            name => "TntInst",
-        };
-
-        bless $self, $class;
-
+        my $self = BaseInst::new($class);
         return $self;
-    }
-
-    sub name {
-        my $self = shift;
-        return $self->{name};
     }
 }
 
