@@ -65,7 +65,7 @@ sub generate_tuple {
 
     my @funcs = ( \&gen_int, \&gen_str, \&gen_bin );
 
-    return \map {
+    return map {
         $funcs[rn(scalar @funcs)]->($compress_factor, $tuple_size);
     } 0 .. $tuple_size * scalar @funcs;
 }
@@ -87,7 +87,7 @@ sub child_work {
         _log("Compress_factor: %d, size: %d", $compress_factor, $tuple_size);
 
         for (0 .. $iterations_count) {
-            $instance->insert(name => rn(9999999999999999), tuple => generate_tuple($tuple_size, $compress_factor));
+            $instance->insert(name => rn(9999999999999999), tuple => [ generate_tuple($tuple_size, $compress_factor) ]);
         }
 
         $compress_factor += rn($compress_factor + 1000);
@@ -109,6 +109,9 @@ sub master_work {
     do {
         sleep($params{sleep_time}) unless $first_step;
         $first_step = 0;
+
+        use Data::Dumper;
+        print Dumper [\%processes, \%children];
 
         for (my ($pid, $name) = each %children) {
             unless (kill 0 => $pid) {
@@ -173,9 +176,12 @@ sub main {
         master_work \@children, \@processes;
     } else {
         # child process
-        # child_work $instance;
+        child_work $instance;
     }
 }
+
+my $login = (getpwuid $>);
+die "must run as root" if $login ne 'root';
 
 main;
 
