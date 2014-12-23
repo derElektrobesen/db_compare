@@ -11,10 +11,17 @@ package MemcachedInst; {
     sub new {
         my $class = shift;
 
-        my $self = BaseInst::new($self);
+        my $self = BaseInst::new($class);
 
         $self->_create_conn();
         return $self;
+    }
+
+    sub pid {
+        open my $f, '<', '/var/run/memcached/memcached.pid';
+        my $pid = <$f>;
+        chomp $pid;
+        return $pid;
     }
 
     sub _create_conn {
@@ -29,7 +36,7 @@ package MemcachedInst; {
         $self->{conn} = $memd;
     }
 
-    sub insert {
+    sub _insert {
         my $self = shift;
         my %args = (
             name    => undef,   # String expected
@@ -40,18 +47,18 @@ package MemcachedInst; {
         $self->{conn}->set($args{name}, { complex => $args{tuple} });
     }
 
-    sub select {
+    sub _select {
         my $self = shift;
         my $name = shift;
 
         $self->{conn}->get($name);
     }
 
-    sub delete {
+    sub _delete {
         my $self = shift;
         my $key = shift;
 
-        $self->{conn}->delete($name);
+        $self->{conn}->delete($key);
     }
 }
 

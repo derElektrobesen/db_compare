@@ -59,12 +59,29 @@ sub generate_tuple {
     } 0 .. $tuple_size * scalar @funcs;
 }
 
+sub _log {
+    printf @_;
+}
+
 sub child_work {
     my $instance = shift;
 
     change_user;
 
+    my $iterations_count = 100000;
+    my $tuple_size = 0; # in elements
+    my $compress_factor = 0;
 
+    for (0 .. $iterations_count) {
+        _log("Compress_factor: %d, size: %d", $compress_factor, $size);
+
+        for (0 .. $iterations_count) {
+            $instance->insert(name => int(rand), tuple => generate_tuple($size, $compress_factor));
+        }
+
+        $compress_factor += int(rand) % ($compress_factor + 1000);
+        $size += int(rand) % ($size + 10);
+    }
 }
 
 sub master_work {
@@ -121,9 +138,11 @@ sub main {
             }
 
             print "Process $pid started...\n";
-            push @processes, { pid => $pid, name => $i->name() };
         }
+
         last if defined $instance;
+
+        push @processes, { pid => $i->pid(), name => $i->name() };
     }
 
     if ($pid) {

@@ -5,6 +5,9 @@ package BaseInst; {
     use warnings;
 
     use Carp;
+    $Carp::CarpLevel = 2;
+
+    use Devel::Size qw( total_size );
 
     sub new {
         my $class = shift;
@@ -31,19 +34,43 @@ package BaseInst; {
         return $self->{name};
     }
 
+    sub pid {
+        my $self = shift;
+        local $Carp::CarpLevel = 1;
+        carp $self->__u_m('pid');
+    }
+
+    sub _insert {
+        my $self = shift;
+        carp $self->__u_m('_insert');
+    }
+
+    sub _select {
+        my $self = shift;
+        carp $self->__u_m('_select');
+    }
+
+    sub _delete {
+        my $self = shift;
+        carp $self->__u_m('_delete');
+    }
+
     sub insert {
         my $self = shift;
-        carp $self->__u_m('insert');
+        $self->_insert(@_);
+        return total_size(@_);
     }
 
     sub select {
         my $self = shift;
-        carp $self->__u_m('select');
+        $self->_select(@_);
+        return 0;
     }
 
     sub delete {
         my $self = shift;
-        carp $self->__u_m('delete');
+        $self->_delete(@_);
+        return total_size(@_);
     }
 }
 
