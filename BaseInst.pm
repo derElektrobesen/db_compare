@@ -17,7 +17,6 @@ package BaseInst; {
         };
 
         bless $self, $class;
-        srand time;
 
         return $self;
     }
@@ -58,7 +57,7 @@ package BaseInst; {
     sub insert {
         my $self = shift;
         $self->_insert(@_);
-        return total_size(@_);
+        return total_size(\@_);
     }
 
     sub select {
@@ -70,7 +69,7 @@ package BaseInst; {
     sub delete {
         my $self = shift;
         $self->_delete(@_);
-        return total_size(@_);
+        return total_size(\@_);
     }
 }
 

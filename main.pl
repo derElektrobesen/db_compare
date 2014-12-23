@@ -17,6 +17,10 @@ my %params = (
     sleep_time      => 1, # in seconds
 );
 
+BEGIN {
+    open URANDOM, '<', '/dev/urandom';
+}
+
 sub change_user {
     # change current process uid/gid
     my $uid = scalar getpwnam 'nobody';
@@ -26,9 +30,16 @@ sub change_user {
     setuid $uid;
 }
 
+sub rn {
+    my $max = shift;
+    my $x;
+    read URANDOM, $x, 4;
+    return int($max * unpack("I", $x) / (2**32));
+}
+
 sub gen_int {
     my $compress_factor = shift;
-    return int(rand) % compress_factor;
+    return $compress_factor ? rn($compress_factor) : 0;
 }
 
 sub gen_str {
@@ -41,7 +52,7 @@ sub gen_str {
 
 sub gen_bin {
     my ($compress_factor, $size) = @_;
-    my @fmt = split //, "cCWaAzbBhHsSlqQiInNvVjJfd";
+    my @fmt = split //, "WaAZbBhHsSlqQiInNvVjJfd";
 
     return join '', map {
         join '', map { pack "$_*", gen_int($compress_factor) } shuffle @fmt;
@@ -55,7 +66,7 @@ sub generate_tuple {
     my @funcs = ( \&gen_int, \&gen_str, \&gen_bin );
 
     return \map {
-        $funcs[int(rand) % scalar @funcs]->($compress_factor, $tuple_size);
+        $funcs[rn(scalar @funcs)]->($compress_factor, $tuple_size);
     } 0 .. $tuple_size * scalar @funcs;
 }
 
@@ -73,48 +84,58 @@ sub child_work {
     my $compress_factor = 0;
 
     for (0 .. $iterations_count) {
-        _log("Compress_factor: %d, size: %d", $compress_factor, $size);
+        _log("Compress_factor: %d, size: %d", $compress_factor, $tuple_size);
 
         for (0 .. $iterations_count) {
-            $instance->insert(name => int(rand), tuple => generate_tuple($size, $compress_factor));
+            $instance->insert(name => rn(9999999999999999), tuple => generate_tuple($tuple_size, $compress_factor));
         }
 
-        $compress_factor += int(rand) % ($compress_factor + 1000);
-        $size += int(rand) % ($size + 10);
+        $compress_factor += rn($compress_factor + 1000);
+        $tuple_size += rn($tuple_size + 10);
     }
 }
 
 sub master_work {
-    my %processes = map { $_->{pid} => $_->{name} } @{$_[0]}; # reference on array of references on hashes
+    my %children = map { $_->{pid} => $_->{name} } @{$_[0]};
+    my %processes = map { $_->{pid} => $_->{name} } @{$_[1]}; # reference on array of references on hashes
 
     open my $out_file, '>', "results_$$.log";
 
     my $first_step = 1;
+    my $content;
+    my $pid;
+    my $name;
+
     do {
         sleep($params{sleep_time}) unless $first_step;
         $first_step = 0;
 
-        my @processes_list_copy = keys %processes;
-        for (sort @processes_list_copy) {
-            unless (kill 0 => $_) {
+        for (my ($pid, $name) = each %children) {
+            unless (kill 0 => $pid) {
                 # child process died
-                delete $processes{$_};
-            } else {
-                my $time = localtime;
-                my $content;
-
-                {
-                    local $/ = undef; # read all file at ones
-                    open my $stat_file, '<', "/proc/$_/stat";
-                    $content = <$stat_file>;
-                    close $stat_file;
-                }
-
-                chomp $content;
-                print $out_file "$time $processes{$_} $content\n";
+                delete $children{$pid};
             }
         }
-    } while (%processes);
+
+        my $time = localtime;
+
+        for (($pid, $name) = each %processes) {
+            unless (kill 0 => $pid) {
+                delete $processes{$pid};
+                print $out_file "$time $name died\n";
+                next;
+            }
+
+            {
+                local $/ = undef; # read all file at ones
+                open my $stat_file, '<', "/proc/$pid/stat";
+                $content = <$stat_file>;
+                close $stat_file;
+            }
+            chomp $content;
+            print $out_file "$time $name $content\n";
+        }
+    } while (scalar %children && scalar %processes);
 }
 
 sub create_instances {
@@ -127,6 +148,7 @@ sub create_instances {
 sub main {
     my $instance;
     my @processes;
+    my @children;
 
     my $pid;
     for my $i (create_instances) {
@@ -138,6 +160,7 @@ sub main {
             }
 
             print "Process $pid started...\n";
+            push @children, { pid => $pid, name => $i->name() };
         }
 
         last if defined $instance;
@@ -147,10 +170,10 @@ sub main {
 
     if ($pid) {
         # master process
-        master_work \@processes;
+        master_work \@children, \@processes;
     } else {
         # child process
-        child_work $instance;
+        # child_work $instance;
     }
 }
 

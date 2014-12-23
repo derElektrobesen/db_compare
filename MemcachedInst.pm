@@ -29,7 +29,7 @@ package MemcachedInst; {
 
         my $memd = Cache::Memcached->new({
             servers             => [ '127.0.0.1:11211' ],
-            debug               => 1,
+            debug               => 0,
             compress_threshold  => 10_000,  # data larger then 10kb will be compressed
         });
 
