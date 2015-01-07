@@ -33,43 +33,35 @@ package BaseInst; {
         return $self->{name};
     }
 
+    sub create_conn {
+        my $self = shift;
+        carp $self->__u_m('create_conn');
+    }
+
     sub pid {
         my $self = shift;
         local $Carp::CarpLevel = 1;
         carp $self->__u_m('pid');
     }
 
-    sub _insert {
-        my $self = shift;
-        carp $self->__u_m('_insert');
-    }
-
-    sub _select {
-        my $self = shift;
-        carp $self->__u_m('_select');
-    }
-
-    sub _delete {
-        my $self = shift;
-        carp $self->__u_m('_delete');
-    }
-
     sub insert {
         my $self = shift;
-        $self->_insert(@_);
-        return total_size(\@_);
+        carp $self->__u_m('insert');
     }
 
     sub select {
         my $self = shift;
-        $self->_select(@_);
-        return 0;
+        carp $self->__u_m('select');
     }
 
     sub delete {
         my $self = shift;
-        $self->_delete(@_);
-        return total_size(\@_);
+        carp $self->__u_m('delete');
+    }
+
+    sub memusage {
+        my $self = shift;
+        carp $self->__u_m('memusage');
     }
 }
 
