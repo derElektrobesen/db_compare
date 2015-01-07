@@ -190,13 +190,27 @@ sub main {
 my %opts;
 getopts('hn:l:', \%opts);
 
+my @available_instances = qw( memc );
+
 if (defined $opts{h}) {
-    print "usage: $0 [-h] [-n name] [-l tuple length]\nName: (memc)\n";
+    print "usage: $0 [-h] [-n name] [-l tuple length]\n" .
+        "Available instances names: " . (join ', ', @available_instances) . "\n";
     exit 0;
 }
 
 $params{inst_name} = $opts{n} if defined $opts{n};
 $params{tuple_size} = $opts{l} if defined $opts{l};
+
+my $inst_found = 0;
+for (@available_instances) {
+    if ($_ eq $params{inst_name}) {
+        $inst_found = 1;
+        last;
+    }
+}
+
+die "Unknown instance found: '$params{inst_name}'.\nAvailable instances names: " .
+    (join ', ', @available_instances) . "\n" unless $inst_found;
 
 my $login = (getpwuid $>);
 die "must run as root" if $login ne 'root';
