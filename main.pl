@@ -6,7 +6,9 @@ use warnings;
 use POSIX;
 
 use List::Util qw( shuffle );
+use Getopt::Std;
 
+use BaseInst;
 use TntInst;
 use MemcachedInst;
 
@@ -18,7 +20,7 @@ my %params = (
     logs_dir        => 'logs',
 
     inst_name       => '',
-    tuple_size      => '',
+    tuple_size      => 1,
 );
 
 BEGIN {
@@ -69,29 +71,30 @@ sub child_work {
     my $first_iter = 100;
     my $items_count = 100;
     my $iters_per_item = 1000;
+    my $tuple_size = $params{tuple_size};
 
-    my @polynom_members = map { int((20 * $_ * $_ - $_) * log($_ / 100) / 3_000) } $first_iter .. $iterations_count;
+    my @polynom_members = map {
+        int((20 * $_ * $_ - $_) * log($_ / 100) / 3_000 / $tuple_size)
+    } $first_iter .. $iterations_count;
 
-    for my $tuple_size (1 .. $items_count) {
-        my $item_size = 1;
+    my $item_size = 1;
 
-        for my $iter ($first_iter .. $iterations_count) {
-            for my $sub_iter (0 .. $iters_per_item) {
-                $instance->insert(name => $tuple_size * $iter * $sub_iter,
-                                  tuple => generate_tuple($item_size, $tuple_size));
-            }
-            $item_size = $polynom_members[$iter] / $tuple_size;
-
-            my $time = scalar time;
-            print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() .
-                          ":" . ($iter * $iters_per_item * $tuple_size) . "\n";
+    for my $iter ($first_iter .. $iterations_count) {
+        for my $sub_iter (0 .. $iters_per_item) {
+            $instance->insert(name => $tuple_size * $iter * $sub_iter,
+                              tuple => generate_tuple($item_size, $tuple_size));
         }
+        $item_size = $polynom_members[$iter];
+
+        my $time = scalar time;
+        print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() .
+                      ":" . ($iter * $iters_per_item * $tuple_size) . "\n";
     }
 }
 
 sub master_work {
     my %children = map { $_->{pid} => $_->{name} } @{$_[0]};
-    my %processes = map { $_->name() => $_ } @{$_[1]};
+    my $inst = $_[1];
 
     my $fname = "$params{logs_dir}/results_$$.log";
     open my $out_file, '>', $fname or die "Can't open $fname: $!\n";
@@ -103,8 +106,7 @@ sub master_work {
 
     my $first_step = 1;
     my $content;
-    my $pid;
-    my $name;
+    my $name = $inst->name();
 
     do {
         sleep($params{sleep_time}) unless $first_step;
@@ -114,43 +116,38 @@ sub master_work {
             unless (kill 0 => $pid) {
                 # child process died
                 delete $children{$pid};
-                delete $processes{$name} unless scalar grep { $name eq $_ } keys %children;
             }
         }
+
+        last unless %children;
 
         my $time = scalar time;
+        my $pid = $inst->pid();
 
-        while (($name, $inst) = each %processes) {
-            my $pid = $inst->pid();
-
-            unless (kill 0 => $pid) {
-                delete $processes{$name};
-                print $out_file "$time:$name:died\n";
-                my $a;
-                for (($a, $_) = each %children) {
-                    delete $children{$a} if $children{$a} eq $name;
-                }
-                next;
-            }
-
-            {
-                local $/ = undef; # read all file at ones
-                open my $stat_file, '<', "/proc/$pid/stat";
-                $content = <$stat_file>;
-                close $stat_file;
-            }
-
-            $content =~ /^(?:\S+ ){22}(\S+).*/; # virtual mem
-            print $out_file "$time:$name:$1\n";
+        unless (kill 0 => $pid) {
+            print $out_file "$time:$name:died\n";
+            last;
         }
-    } while (scalar %children && scalar %processes);
+
+        {
+            local $/ = undef; # read all file at ones
+            open my $stat_file, '<', "/proc/$pid/stat";
+            $content = <$stat_file>;
+            close $stat_file;
+        }
+
+        $content =~ /^(?:\S+ ){22}(\S+).*/; # virtual mem
+        print $out_file "$time:$name:$1\n";
+    } while (scalar %children && $inst);
 }
 
-sub create_instances {
-    return (
-        #TntInst->new,
-        MemcachedInst->new,
-    );
+sub create_instance {
+    my $name = shift;
+    if ($name eq 'memc') {
+        return MemcachedInst->new;
+    } else {
+        return BaseInst->new;
+    }
 }
 
 sub main {
@@ -163,40 +160,43 @@ sub main {
         chown get_user, $params{logs_dir};
     }
 
-    my @created_instances = create_instances;
-    for (@created_instances) {
-        die "Can't create instance " . $_->name() . " (not running)\n"
-            unless kill 'SIGZERO', $_->pid();
-    }
+    my $created_instance = create_instance $params{inst_name};
+    die "Can't create instance " . $created_instance->name() . " (not running)\n"
+        unless kill 'SIGZERO', $created_instance->pid();
 
     my $pid;
-    for my $i (@created_instances) {
-        for (1 .. $params{n_processes}) {
-            $pid = fork;
-            unless ($pid) {
-                $instance = $i;
-                last;
-            }
-
-            push @children, { pid => $pid, name => $i->name() };
-
-            print "Process $pid (" . $i->name() . ") started...\n";
+    for (1 .. $params{n_processes}) {
+        $pid = fork;
+        unless ($pid) {
+            $instance = $created_instance;
+            last;
         }
 
-        last if defined $instance;
+        push @children, { pid => $pid, name => $created_instance->name() };
 
-        push @processes, $i;
+        print "Process $pid (" . $created_instance->name() . ") started...\n";
     }
 
     if ($pid) {
         # master process
-        master_work \@children, \@processes;
+        master_work \@children, $created_instance;
     } else {
         # child process
         $instance->create_conn();
         child_work $instance;
     }
 }
+
+my %opts;
+getopts('hn:l:', \%opts);
+
+if (defined $opts{h}) {
+    print "usage: $0 [-h] [-n name] [-l tuple length]\nName: (memc)\n";
+    exit 0;
+}
+
+$params{inst_name} = $opts{n} if defined $opts{n};
+$params{tuple_size} = $opts{l} if defined $opts{l};
 
 my $login = (getpwuid $>);
 die "must run as root" if $login ne 'root';
