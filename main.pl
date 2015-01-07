@@ -11,6 +11,7 @@ use Getopt::Std;
 use BaseInst;
 use TntInst;
 use MemcachedInst;
+use DataManip;
 
 $SIG{CHLD} = "IGNORE";
 
@@ -22,10 +23,6 @@ my %params = (
     inst_name       => '',
     tuple_size      => 1,
 );
-
-BEGIN {
-    open URANDOM, '<', '/dev/urandom';
-}
 
 sub get_user {
     my $name = $_[0] || 'nobody';
@@ -45,9 +42,7 @@ sub change_user {
 
 sub gen_data {
     my $data_size = shift;
-    my $data;
-    read URANDOM, $data, $data_size;
-    return \$data;
+    return DataManip::read($data_size);
 }
 
 sub generate_tuple {
@@ -183,7 +178,9 @@ sub main {
     } else {
         # child process
         $instance->create_conn();
+        DataManip::start();
         child_work $instance;
+        DataManip::stop();
     }
 }
 
