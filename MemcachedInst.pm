@@ -14,16 +14,15 @@ package MemcachedInst; {
         return $self;
     }
 
-    sub pid {
-        my $self = shift;
+    sub get_pid {
+        open my $f, '<', '/var/run/memcached/memcached.pid';
+        my $pid = <$f>;
+        chomp $pid;
+        return $pid;
+    }
 
-        unless (defined $self->{_pid}) {
-            open my $f, '<', '/var/run/memcached/memcached.pid';
-            my $pid = <$f>;
-            chomp $pid;
-            $self->{_pid} = $pid;
-        }
-        return $self->{_pid};
+    sub real_restart {
+        system 'bash /etc/init.d/memcached restart';
     }
 
     sub create_conn {
@@ -61,6 +60,10 @@ package MemcachedInst; {
         my $key = shift;
 
         $self->{conn}->delete($key);
+    }
+
+    sub memusage {
+        return 0;
     }
 }
 

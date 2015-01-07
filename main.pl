@@ -16,6 +16,9 @@ my %params = (
     n_processes     => 1,
     sleep_time      => 2, # in seconds
     logs_dir        => 'logs',
+
+    inst_name       => '',
+    tuple_size      => '',
 );
 
 BEGIN {
@@ -38,110 +41,94 @@ sub change_user {
     setuid $uid;
 }
 
-sub rn {
-    my $max = shift;
-    my $x;
-    read URANDOM, $x, 4;
-    return int($max * unpack("I", $x) / (2**32));
-}
-
-sub gen_int {
-    my $compress_factor = shift;
-    return $compress_factor ? rn($compress_factor) : 0;
-}
-
-sub gen_str {
-    my ($compress_factor, $size) = @_;
-    return join '', map {
-        my $data = $_ * gen_int($compress_factor);
-        "$data"
-    } 0 .. $size;
-}
-
-sub gen_bin {
-    my ($compress_factor, $size) = @_;
-    my @fmt = split //, "WaAZbBhHsSlqQiInNvVjJfd";
-
-    return join '', map {
-        join '', map { pack "$_*", gen_int($compress_factor) } shuffle @fmt;
-    } 0 .. $size;
+sub gen_data {
+    my $data_size = shift;
+    my $data;
+    read URANDOM, $data, $data_size;
+    return \$data;
 }
 
 sub generate_tuple {
-    my $tuple_size = shift;      # tuple_size
-    my $compress_factor = shift; # integer, may be undefined, 0 -- best compress
+    my $item_size = shift;
+    my $tuple_size = shift;
 
-    my @funcs = ( \&gen_int, \&gen_str, \&gen_bin );
-
-    return map {
-        $funcs[rn(scalar @funcs)]->($compress_factor, $tuple_size);
-    } 0 .. $tuple_size * scalar @funcs;
+    return [ map { ${gen_data($item_size)} } 1 .. $tuple_size ];
 }
 
 sub child_work {
     my $instance = shift;
 
     change_user;
-    open my $log_fd, '>', "$params{logs_dir}/proc_$$.log";
+    open my $log_fd, '>', "$params{logs_dir}/proc_" . (lc $instance->name()) . "_$$.log";
 
-    my $iterations_count = 100000;
-    my $tuple_size = 0; # in elements
-    my $compress_factor = 0;
+    select $log_fd;
+    $| = 1;
+    select STDOUT;
 
-    for (0 .. $iterations_count) {
-        warn scalar localtime() . " Compress_factor: $compress_factor, size: $tuple_size";
+    my $iterations_count = 100_000;
+    my $first_iter = 100;
+    my $items_count = 100;
+    my $iters_per_item = 1000;
 
-        for (0 .. $iterations_count) {
-            $instance->insert(name => rn(9999999999999999), tuple => [ generate_tuple($tuple_size, $compress_factor) ]);
+    my @polynom_members = map { int((20 * $_ * $_ - $_) * log($_ / 100) / 3_000) } $first_iter .. $iterations_count;
+
+    for my $tuple_size (1 .. $items_count) {
+        my $item_size = 1;
+
+        for my $iter ($first_iter .. $iterations_count) {
+            for my $sub_iter (0 .. $iters_per_item) {
+                $instance->insert(name => $tuple_size * $iter * $sub_iter,
+                                  tuple => generate_tuple($item_size, $tuple_size));
+            }
+            $item_size = $polynom_members[$iter] / $tuple_size;
+
+            my $time = scalar time;
+            print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() .
+                          ":" . ($iter * $iters_per_item * $tuple_size) . "\n";
         }
-
-        $compress_factor += rn($compress_factor + 1000);
-        $tuple_size += rn($tuple_size + 10);
     }
 }
 
 sub master_work {
     my %children = map { $_->{pid} => $_->{name} } @{$_[0]};
-    my %processes = map { $_->{pid} => $_->{name} } @{$_[1]}; # reference on array of references on hashes
+    my %processes = map { $_->name() => $_ } @{$_[1]};
 
     my $fname = "$params{logs_dir}/results_$$.log";
-    open my $out_file, '>', $fname;
+    open my $out_file, '>', $fname or die "Can't open $fname: $!\n";
     chown get_user, $fname;
+
+    select $out_file;
+    $| = 1;
+    select STDOUT;
 
     my $first_step = 1;
     my $content;
     my $pid;
     my $name;
 
-    open my $shit, '>', '/dev/null';
-
-    use Data::Dumper;
     do {
         sleep($params{sleep_time}) unless $first_step;
         $first_step = 0;
 
-        print $shit Dumper [\%processes, \%children];
-
-        for (my ($pid, $name) = each %children) {
+        while (my ($pid, $name) = each %children) {
             unless (kill 0 => $pid) {
                 # child process died
                 delete $children{$pid};
-                my $a;
-                for (($a, $_) = each %processes) {
-                    delete $processes{$a} if $children{$pid} eq $processes{$a};
-                }
+                delete $processes{$name} unless scalar grep { $name eq $_ } keys %children;
             }
         }
 
-        my $time = localtime;
+        my $time = scalar time;
 
-        for (($pid, $name) = each %processes) {
+        while (($name, $inst) = each %processes) {
+            my $pid = $inst->pid();
+
             unless (kill 0 => $pid) {
-                delete $processes{$pid};
-                print $out_file "$time $name died\n";
+                delete $processes{$name};
+                print $out_file "$time:$name:died\n";
                 my $a;
                 for (($a, $_) = each %children) {
-                    delete $children{$a} if $children{$a} eq $processes{$pid};
+                    delete $children{$a} if $children{$a} eq $name;
                 }
                 next;
             }
@@ -152,8 +139,9 @@ sub master_work {
                 $content = <$stat_file>;
                 close $stat_file;
             }
-            chomp $content;
-            print $out_file "$time $name $content\n";
+
+            $content =~ /^(?:\S+ ){22}(\S+).*/; # virtual mem
+            print $out_file "$time:$name:$1\n";
         }
     } while (scalar %children && scalar %processes);
 }
@@ -197,8 +185,7 @@ sub main {
 
         last if defined $instance;
 
-        $instance->create_conn();
-        push @processes, { pid => $instance->pid(), name => $instance->name() };
+        push @processes, $i;
     }
 
     if ($pid) {
@@ -206,6 +193,7 @@ sub main {
         master_work \@children, \@processes;
     } else {
         # child process
+        $instance->create_conn();
         child_work $instance;
     }
 }
