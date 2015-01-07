@@ -63,7 +63,18 @@ package MemcachedInst; {
     }
 
     sub memusage {
-        return 0;
+        my $self = shift;
+        my $r = $self->{conn}->stats(["sizes"]);
+        my $c = 0;
+
+        my @srv = keys %{$r->{hosts}};
+        my $ref = $r->{hosts}->{$srv[0]}->{sizes};
+
+        for (keys %$ref) {
+            $c += $_ * $ref->{$_};
+        }
+
+        return $c;
     }
 }
 

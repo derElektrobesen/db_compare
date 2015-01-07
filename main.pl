@@ -56,7 +56,7 @@ sub child_work {
     my $instance = shift;
 
     change_user;
-    open my $log_fd, '>', "$params{logs_dir}/proc_" . (lc $instance->name()) . "_$$.log";
+    open my $log_fd, '>', "$params{logs_dir}/$params{inst_name}_$params{tuple_size}_slave.log";
 
     select $log_fd;
     $| = 1;
@@ -64,26 +64,24 @@ sub child_work {
 
     my $iterations_count = 100_000;
     my $first_iter = 100;
-    my $items_count = 100;
-    my $iters_per_item = 1000;
+    my $iters_per_item = 10;
     my $tuple_size = $params{tuple_size};
 
     my @polynom_members = map {
-        int((20 * $_ * $_ - $_) * log($_ / 100) / 3_000 / $tuple_size)
+        int((20 * $_ * $_ - $_) * log($_ / 100) / 3_000 / $tuple_size + 1)
     } $first_iter .. $iterations_count;
 
-    my $item_size = 1;
-
-    for my $iter ($first_iter .. $iterations_count) {
+    my $total = 0;
+    for my $iter (0 .. $iterations_count - $first_iter) {
+        my $item_size = $polynom_members[$iter];
         for my $sub_iter (0 .. $iters_per_item) {
             $instance->insert(name => $tuple_size * $iter * $sub_iter,
                               tuple => generate_tuple($item_size, $tuple_size));
+            $total += $item_size * $iter;
         }
-        $item_size = $polynom_members[$iter];
 
         my $time = scalar time;
-        print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() .
-                      ":" . ($iter * $iters_per_item * $tuple_size) . "\n";
+        print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() . ":$total\n";
     }
 }
 
@@ -91,7 +89,7 @@ sub master_work {
     my %children = map { $_->{pid} => $_->{name} } @{$_[0]};
     my $inst = $_[1];
 
-    my $fname = "$params{logs_dir}/results_$$.log";
+    my $fname = "$params{logs_dir}/$params{inst_name}_$params{tuple_size}_master.log";
     open my $out_file, '>', $fname or die "Can't open $fname: $!\n";
     chown get_user, $fname;
 
