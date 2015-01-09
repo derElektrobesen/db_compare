@@ -1,0 +1,7 @@
+Changes
+DataManip.xs
+Makefile.PL
+MANIFEST
+README
+t/DataManip.t
+lib/DataManip.pm
