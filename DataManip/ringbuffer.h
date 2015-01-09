@@ -65,15 +65,22 @@
 #define isBufferEmpty(BUF) (BUF->end == BUF->start)
 #define isBufferFull(BUF) (nextEndIndex(BUF) == BUF->start)
 
-#define bufferWrite(BUF, ELEM) \
-  BUF->elems[BUF->end] = ELEM; \
-  BUF->end = (BUF->end + 1) % BUF->size; \
-  if (isBufferEmpty(BUF)) { \
-    BUF->start = nextStartIndex(BUF); \
-  }
+#define bufferWrite(BUF, ELEM) ({ \
+	if (!isBufferFull(BUF)) { \
+		BUF->elems[BUF->end] = ELEM; \
+		BUF->end = (BUF->end + 1) % BUF->size; \
+		if (isBufferEmpty(BUF)) { \
+			BUF->start = nextStartIndex(BUF); \
+		} \
+	} \
+})
 
-#define bufferRead(BUF, ELEM) \
-    ELEM = BUF->elems[BUF->start]; \
-    BUF->start = nextStartIndex(BUF);
+#define bufferRead(BUF, ELEM) ({ \
+	if (!isBufferEmpty(BUF)) { \
+		ELEM = BUF->elems[BUF->start]; \
+		BUF->start = nextStartIndex(BUF); \
+	} \
+})
+
 
 #endif
