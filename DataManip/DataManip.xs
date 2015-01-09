@@ -13,15 +13,15 @@
 #define MAX_THREADS 10
 #define SLEEP_TIME 100
 
-#ifdef LOG_LEVEL
-	static int log_level = LOG_LEVEL;
-#else
-	static int log_level = 0;
+#ifndef LOG_LEVEL
+#	define LOG_LEVEL 0
 #endif
 
 #ifndef BLOCK_SIZE
 #	define BLOCK_SIZE 4096
 #endif
+
+static int log_level = LOG_LEVEL;
 
 #define log_msg(args...) ({			\
 	if (log_level > 3)			\
