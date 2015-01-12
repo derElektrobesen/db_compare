@@ -7,11 +7,12 @@
 #include <errno.h>
 #include <time.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "ringbuffer.h"
 
 #define MAX_THREADS 10
-#define SLEEP_TIME 100
+#define SLEEP_TIME 10000
 
 #ifndef LOG_LEVEL
 #	define LOG_LEVEL 0
@@ -96,7 +97,7 @@ static bool have_data() {
 	bool have_data = false;
 
 	pthread_rwlock_rdlock(&ring_lock);
-	have_data = isBufferFull(ring_buffer);
+	have_data = !isBufferFull(ring_buffer);
 	pthread_rwlock_unlock(&ring_lock);
 
 	return have_data;
@@ -164,14 +165,17 @@ static void *data_xorer_routine(void *arg) {
 
 static void *data_writer_routine(void *arg) {
 	log_msg("Writer started\n");
-	FILE *dev = fopen("/dev/urandom", "r");
+	const char *dev_name = "/dev/urandom";
+	FILE *dev = fopen(dev_name, "r");
 	if (dev == NULL)
-		die("Can't open /dev/urandom: %s\n", strerror(errno));
+		die("Can't open %s: %s\n", dev_name, strerror(errno));
 
+	log_msg("%s dev opened successfully\n", dev_name);
 	while (!need_stop) {
 		int block_no = find_empty_block();
 
 		if (block_no < 0) {
+			log_msg("Empty block not found\n");
 			usleep(SLEEP_TIME);
 			continue;
 		}
@@ -181,7 +185,13 @@ static void *data_writer_routine(void *arg) {
 		content.content_len = sizeof(data_block[block_no].data);
 		content.block_no = block_no;
 
-		fread(content.ptr, content.content_len, 1, dev);
+		size_t readed = fread(content.ptr, content.content_len, 1, dev);
+		if (readed != 1) {
+			err_msg("Can't read 1 block of size %lu from %s\n", content.content_len, dev_name);
+			continue;
+		}
+
+		log_msg("%lu bytes read from %s\n", content.content_len, dev_name);
 
 		pthread_rwlock_wrlock(&ring_lock);
 		bufferWrite(ring_buffer, content);
@@ -215,6 +225,8 @@ read_block(length)
 			}
 
 			if (content.content_len == 0) {
+				log_msg("Can't get block with size %lu [%d blocks in queue]\n",
+						length, bufferLength(ring_buffer));
 				try_no++;
 				usleep(SLEEP_TIME);
 				continue;

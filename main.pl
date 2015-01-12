@@ -25,6 +25,8 @@ my %params = (
 
     inst_name       => '',
     tuple_size      => 1,
+
+    blocks_count    => 1000,
 );
 
 sub get_user {
@@ -179,7 +181,7 @@ sub main {
     } else {
         # child process
         $instance->create_conn();
-        DataManip::start();
+        DataManip::start($params{blocks_count});
         child_work $instance;
         DataManip::stop();
     }
