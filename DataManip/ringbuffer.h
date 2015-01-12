@@ -59,14 +59,12 @@
   (BUF).elems = (T*)calloc((BUF).size, sizeof(T))
 
 
-#define ABS(n) ((n) > 0 ? (n) : -(n))
-
 #define bufferDestroy(BUF) free(BUF->elems)
 #define nextStartIndex(BUF) ((BUF->start + 1) % BUF->size)
 #define nextEndIndex(BUF) ((BUF->end + 1) % BUF->size)
 #define isBufferEmpty(BUF) (BUF->end == BUF->start)
 #define isBufferFull(BUF) (nextEndIndex(BUF) == BUF->start)
-#define bufferLength(BUF) (ABS(BUF->end - BUF->start))
+#define bufferLength(BUF) ((BUF->end < BUF->start) ? (BUF->size - BUF->start + BUF->end) : (BUF->end - BUF->start))
 
 #define bufferWrite(BUF, ELEM) ({ \
 	if (!isBufferFull(BUF)) { \

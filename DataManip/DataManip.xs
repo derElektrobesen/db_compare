@@ -11,8 +11,8 @@
 
 #include "ringbuffer.h"
 
-#define MAX_THREADS 10
-#define SLEEP_TIME 10000
+#define MAX_THREADS 3
+#define SLEEP_TIME 100
 
 #ifndef LOG_LEVEL
 #	define LOG_LEVEL 0
@@ -191,10 +191,9 @@ static void *data_writer_routine(void *arg) {
 			continue;
 		}
 
-		log_msg("%lu bytes read from %s\n", content.content_len, dev_name);
-
 		pthread_rwlock_wrlock(&ring_lock);
 		bufferWrite(ring_buffer, content);
+		log_msg("%lu bytes read from %s [%d blocks in queue]\n", content.content_len, dev_name, bufferLength(ring_buffer));
 		pthread_rwlock_unlock(&ring_lock);
 	}
 
@@ -211,8 +210,8 @@ SV *
 read_block(length)
 	size_t length
 	CODE:
-		RETVAL = newSV(length);
-		SV *ptr = RETVAL;
+		SV *r = newSV(length);
+		sv_setpvn(r, "", 0);
 
 		int try_no = 0;
 
@@ -220,27 +219,26 @@ read_block(length)
 		while (length > 0) {
 			get_content(&content);
 
-			if (try_no > 3) {
+			if (try_no > 20) {
 				start_thread(&data_xorer_routine);
+				try_no = 0;
 			}
 
 			if (content.content_len == 0) {
-				log_msg("Can't get block with size %lu [%d blocks in queue]\n",
-						length, bufferLength(ring_buffer));
-				try_no++;
+				log_msg("Can't get block with size %lu [%d blocks in queue] [try = %d]\n",
+						length, bufferLength(ring_buffer), ++try_no);
 				usleep(SLEEP_TIME);
 				continue;
 			}
 
 			if (content.content_len >= length) {
-				memcpy(ptr, content.ptr, length);
+				sv_catpvn(r, content.ptr, length);
 				content.ptr += length;
 				content.content_len -= length;
 				length = 0;
 			} else {
+				sv_catpvn(r, content.ptr, content.content_len);
 				length -= content.content_len;
-				memcpy(ptr, content.ptr, content.content_len);
-				ptr += content.content_len;
 				content.content_len = 0;
 
 				data_block[content.block_no].available = true;
@@ -252,6 +250,8 @@ read_block(length)
 				pthread_rwlock_unlock(&ring_lock);
 			}
 		}
+
+		RETVAL = newRV_noinc(r);
 
 void
 start(blocks_count)

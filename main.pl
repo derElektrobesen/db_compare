@@ -54,7 +54,12 @@ sub generate_tuple {
     my $item_size = shift;
     my $tuple_size = shift;
 
-    return [ map { ${gen_data($item_size)} } 1 .. $tuple_size ];
+    my @t;
+    for (1 .. $tuple_size) {
+        push @t, gen_data($item_size);
+    }
+
+    return \@t;
 }
 
 sub child_work {
@@ -80,14 +85,16 @@ sub child_work {
     for my $iter (0 .. $iterations_count - $first_iter) {
         my $item_size = $polynom_members[$iter];
         for my $sub_iter (0 .. $iters_per_item) {
-            $instance->insert(name => $tuple_size * $iter * $sub_iter,
-                              tuple => generate_tuple($item_size, $tuple_size));
+            my $t = generate_tuple($item_size, $tuple_size);
+            $instance->insert(name => $tuple_size * $iter * $sub_iter, tuple => $t);
             $total += $item_size * $iter;
+            undef $t;
         }
 
         my $time = scalar time;
         print $log_fd "$time:$tuple_size:$item_size:" . $instance->memusage() . ":$total\n";
     }
+    warn "Child work complete!";
 }
 
 sub master_work {
@@ -117,25 +124,25 @@ sub master_work {
             }
         }
 
-        last unless %children;
+        if (%children) {
+            my $time = scalar time;
+            my $pid = $inst->pid();
 
-        my $time = scalar time;
-        my $pid = $inst->pid();
+            unless (kill 0 => $pid) {
+                print $out_file "$time:$name:died\n";
+                last;
+            }
 
-        unless (kill 0 => $pid) {
-            print $out_file "$time:$name:died\n";
-            last;
+            {
+                local $/ = undef; # read all file at ones
+                open my $stat_file, '<', "/proc/$pid/stat";
+                $content = <$stat_file>;
+                close $stat_file;
+            }
+
+            $content =~ /^(?:\S+ ){22}(\S+).*/; # virtual mem
+            print $out_file "$time:$name:$1\n";
         }
-
-        {
-            local $/ = undef; # read all file at ones
-            open my $stat_file, '<', "/proc/$pid/stat";
-            $content = <$stat_file>;
-            close $stat_file;
-        }
-
-        $content =~ /^(?:\S+ ){22}(\S+).*/; # virtual mem
-        print $out_file "$time:$name:$1\n";
     } while (scalar %children && $inst);
 }
 
