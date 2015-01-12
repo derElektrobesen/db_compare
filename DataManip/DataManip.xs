@@ -157,6 +157,8 @@ static void *data_xorer_routine(void *arg) {
 		pthread_rwlock_unlock(&ring_lock);
 	}
 
+	log_msg("Xorer #%d stopped\n", *(int *)(arg));
+
 	return NULL;
 }
 
@@ -185,6 +187,8 @@ static void *data_writer_routine(void *arg) {
 		bufferWrite(ring_buffer, content);
 		pthread_rwlock_unlock(&ring_lock);
 	}
+
+	log_msg("Writer stopped\n");
 
 	return NULL;
 }
@@ -266,6 +270,8 @@ start(blocks_count)
 void
 stop()
 	CODE:
+		log_msg("Stopping threads...\n");
+
 		need_stop = true;
 		stop_threads();
 
