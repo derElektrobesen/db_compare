@@ -11,6 +11,9 @@ use Getopt::Std;
 use BaseInst;
 use TntInst;
 use MemcachedInst;
+
+use lib 'DataManip/blib/lib';
+use lib 'DataManip/blib/arch';
 use DataManip;
 
 $SIG{CHLD} = "IGNORE";
@@ -42,7 +45,7 @@ sub change_user {
 
 sub gen_data {
     my $data_size = shift;
-    return DataManip::read($data_size);
+    return DataManip::read_block($data_size);
 }
 
 sub generate_tuple {
