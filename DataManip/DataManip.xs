@@ -225,7 +225,7 @@ read_block(length)
 			}
 
 			if (content.content_len == 0) {
-				log_msg("Can't get block with size %lu [%d blocks in queue] [try = %d]\n",
+				log_msg("Can't get block of size %lu [%d blocks in queue] [try = %d]\n",
 						length, bufferLength(ring_buffer), ++try_no);
 				usleep(SLEEP_TIME);
 				continue;
@@ -251,7 +251,7 @@ read_block(length)
 			}
 		}
 
-		RETVAL = newRV_noinc(r);
+		RETVAL = r;
 
 void
 start(blocks_count)
