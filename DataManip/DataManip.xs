@@ -11,7 +11,10 @@
 
 #include "ringbuffer.h"
 
-#define MAX_THREADS 3
+#ifndef MAX_THREADS
+#	define MAX_THREADS 3
+#endif
+
 #define SLEEP_TIME 100
 
 #ifndef LOG_LEVEL
@@ -207,11 +210,20 @@ static void *data_writer_routine(void *arg) {
 MODULE = DataManip		PACKAGE = DataManip
 
 SV *
-read_block(length)
+read_block(var, length)
+	SV* var
 	size_t length
 	CODE:
-		SV *r = newSV(length);
-		sv_setpvn(r, "", 0);
+		if (!SvROK(var) || SvTYPE(var) != SVt_RV)
+			croak("Not a reference");
+
+		SvREFCNT_inc(var);
+		SV *data = SvRV(var);
+
+		if (!SvROK(data))
+			croak("Not a scalar reference");
+		sv_setpvn(data, "", 0);
+		SvGROW(data, length + 1);
 
 		int try_no = 0;
 
@@ -232,12 +244,12 @@ read_block(length)
 			}
 
 			if (content.content_len >= length) {
-				sv_catpvn(r, content.ptr, length);
+				sv_catpvn(data, content.ptr, length);
 				content.ptr += length;
 				content.content_len -= length;
 				length = 0;
 			} else {
-				sv_catpvn(r, content.ptr, content.content_len);
+				sv_catpvn(data, content.ptr, content.content_len);
 				length -= content.content_len;
 				content.content_len = 0;
 
@@ -251,7 +263,9 @@ read_block(length)
 			}
 		}
 
-		RETVAL = r;
+		RETVAL = var;
+	OUTPUT:
+		RETVAL
 
 void
 start(blocks_count)

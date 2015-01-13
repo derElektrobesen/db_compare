@@ -47,19 +47,25 @@ sub change_user {
 
 sub gen_data {
     my $data_size = shift;
-    return DataManip::read_block($data_size);
+    my $arg_ref = shift;
+
+    DataManip::read_block($arg_ref, $data_size);
 }
+
+my @tuple;
 
 sub generate_tuple {
     my $item_size = shift;
-    my $tuple_size = shift;
 
-    my @t;
-    for (1 .. $tuple_size) {
-        push @t, gen_data($item_size);
+    if (@tuple < $params{tuple_size}) {
+        @tuple = (0 x $params{tuple_size});
     }
 
-    return \@t;
+    for (0 .. @tuple - 1) {
+        gen_data($item_size, \$tuple[$_]);
+    }
+
+    return \@tuple;
 }
 
 sub child_work {
@@ -85,7 +91,7 @@ sub child_work {
     for my $iter (0 .. $iterations_count - $first_iter) {
         my $item_size = $polynom_members[$iter];
         for my $sub_iter (0 .. $iters_per_item) {
-            my $t = generate_tuple($item_size, $tuple_size);
+            my $t = generate_tuple($item_size);
             $instance->insert(name => $tuple_size * $iter * $sub_iter, tuple => $t);
             $total += $item_size * $iter;
             undef $t;
