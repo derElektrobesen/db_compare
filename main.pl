@@ -26,7 +26,7 @@ my %params = (
     inst_name       => '',
     tuple_size      => 1,
 
-    blocks_count    => 1000,
+    blocks_count    => 10000,
 );
 
 sub get_user {

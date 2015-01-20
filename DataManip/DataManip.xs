@@ -11,8 +11,14 @@
 
 #include "ringbuffer.h"
 
+#define READERS_THREADS_COUNT 5
+
 #ifndef MAX_THREADS
-#	define MAX_THREADS 3
+#	define MAX_THREADS (3 + READERS_THREADS_COUNT)
+#endif
+
+#if MAX_THREADS < READERS_THREADS_COUNT
+#	error "MAX_THREADS NEED TO BE LARGER"
 #endif
 
 #define SLEEP_TIME 100
@@ -47,6 +53,13 @@ typedef struct {
 	bool available;
 } real_buffer_t;
 
+typedef struct {
+	SV *var;
+	size_t block_len;
+	pthread_mutex_t *mutex;
+	PerlInterpreter *perl;
+} reader_content_t;
+
 ringBuffer_typedef(buffer_content_t, ring_buffer_t);
 
 static ring_buffer_t *ring_buffer;
@@ -72,7 +85,7 @@ static void stop_threads() {
 }
 
 static int start_thread(void *(*thread_routine)(void *)) {
-	if (threads_count >= sizeof(threads) / sizeof(*threads)) {
+	if (threads_count >= sizeof(threads) / sizeof(*threads) - READERS_THREADS_COUNT) {
 		err_msg("Too many threads\n");
 		return -1;
 	}
@@ -178,7 +191,6 @@ static void *data_writer_routine(void *arg) {
 		int block_no = find_empty_block();
 
 		if (block_no < 0) {
-			log_msg("Empty block not found\n");
 			usleep(SLEEP_TIME);
 			continue;
 		}
@@ -205,6 +217,57 @@ static void *data_writer_routine(void *arg) {
 	return NULL;
 }
 
+static void *data_reader_routine(void *arg) {
+	reader_content_t *dst = (reader_content_t *)arg;
+
+	int try_no = 0;
+
+	register PerlInterpreter *my_perl __attribute__((unused)) = dst->perl;
+	buffer_content_t content;
+	while (dst->block_len > 0) {
+		get_content(&content);
+
+		if (content.content_len == 0) {
+			log_msg("Can't get block of size %lu [%d blocks in queue] [try = %d]\n",
+					dst->block_len, bufferLength(ring_buffer), ++try_no);
+
+			if (try_no > 20) {
+				start_thread(&data_xorer_routine);
+				try_no = 0;
+			}
+
+			usleep(SLEEP_TIME);
+			continue;
+		}
+
+		size_t len = dst->block_len;
+		char *ptr = content.ptr;
+		if (content.content_len >= dst->block_len) {
+			content.ptr += dst->block_len;
+			content.content_len -= dst->block_len;
+			dst->block_len = 0;
+		} else {
+			len = content.content_len;
+			dst->block_len -= content.content_len;
+			content.content_len = 0;
+
+			data_block[content.block_no].available = true;
+		}
+
+		pthread_mutex_lock(dst->mutex);
+		sv_catpvn(dst->var, ptr, len);
+		pthread_mutex_unlock(dst->mutex);
+
+		if (content.content_len > 0) {
+			pthread_rwlock_wrlock(&ring_lock);
+			bufferWrite(ring_buffer, content);
+			pthread_rwlock_unlock(&ring_lock);
+		}
+	}
+
+	return NULL;
+}
+
 // ================================================
 
 MODULE = DataManip		PACKAGE = DataManip
@@ -220,47 +283,49 @@ read_block(var, length)
 		SvREFCNT_inc(var);
 		SV *data = SvRV(var);
 
-		if (!SvROK(data))
+		if (!SvPOK(data))
 			croak("Not a scalar reference");
 		sv_setpvn(data, "", 0);
 		SvGROW(data, length + 1);
 
-		int try_no = 0;
+		pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+		reader_content_t readers[READERS_THREADS_COUNT];
 
-		buffer_content_t content;
-		while (length > 0) {
-			get_content(&content);
+		int i;
+		const int count = sizeof(readers) / sizeof(*readers);
 
-			if (try_no > 20) {
-				start_thread(&data_xorer_routine);
-				try_no = 0;
+		for (i = 0; i < count; ++i) {
+			readers[i].mutex = &mutex;
+			readers[i].var = data;
+			readers[i].block_len = 0;
+			readers[i].perl = my_perl; // variable will be generated on preprocessing
+		}
+
+		int threads_count = 0;
+		if (length >= 10 * 1024 * 1024) {
+			// 10 Mb
+			size_t data_size = 0;
+			for (i = 0; i < count; ++i) {
+				int c = (i == count - 1 ? 1 : (count - threads_count));
+				readers[i].block_len = (length - data_size) / c;
+				data_size += readers[i].block_len;
+
+				int res = pthread_create(threads + sizeof(threads) / sizeof(*threads) - i - 1,
+						NULL, data_reader_routine, readers + i);
+				if (res != 0)
+					err_msg("Can't create reader thread #%d: %s\n", i, strerror(res));
+				else
+					++threads_count;
 			}
 
-			if (content.content_len == 0) {
-				log_msg("Can't get block of size %lu [%d blocks in queue] [try = %d]\n",
-						length, bufferLength(ring_buffer), ++try_no);
-				usleep(SLEEP_TIME);
-				continue;
+			for (i = 0; i < count; ++i) {
+				pthread_t *th = threads + sizeof(threads) / sizeof(*threads) - i - 1;
+				pthread_join(*th, NULL);
+				memset(th, 0, sizeof(*th));
 			}
-
-			if (content.content_len >= length) {
-				sv_catpvn(data, content.ptr, length);
-				content.ptr += length;
-				content.content_len -= length;
-				length = 0;
-			} else {
-				sv_catpvn(data, content.ptr, content.content_len);
-				length -= content.content_len;
-				content.content_len = 0;
-
-				data_block[content.block_no].available = true;
-			}
-
-			if (content.content_len > 0) {
-				pthread_rwlock_wrlock(&ring_lock);
-				bufferWrite(ring_buffer, content);
-				pthread_rwlock_unlock(&ring_lock);
-			}
+		} else {
+			readers->block_len = length;
+			data_reader_routine(readers);
 		}
 
 		RETVAL = var;
